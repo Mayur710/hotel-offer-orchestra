@@ -51,7 +51,7 @@ This project uses plain Redis (`redis:7-alpine`, no RediSearch) with two keys pe
 
 ```bash
 # Clone the repository and enter the project directory
-git clone <your-repo-url>
+git clone https://github.com/Mayur710/hotel-offer-orchestra
 cd hotel-offer-orchestra
 
 # Build images and start all 6 services (temporal-db, temporal, temporal-ui, redis, app, worker)
