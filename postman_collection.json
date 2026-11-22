@@ -1,0 +1,534 @@
+{
+  "info": {
+    "_postman_id": "a7f3c9d2-4b18-4e6a-9c2f-81d5e3b0f4a1",
+    "name": "Hotel Offer Orchestrator API",
+    "description": "Postman Collection v2.1 for testing the Hotel Offer Orchestrator (Express, Temporal, Redis, Docker Compose).\n\nRun the whole collection against the stack in normal mode (docker compose up --build -d) - every item is green.\n\nOutage mode (optional): restart the app with SUPPLIER_B_DOWN=true docker compose up -d app and run item 8 - its assertions adapt to the live /health status. Items 1-7 assert normal-mode data and will legitimately differ while a supplier is down.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Delhi - Expected Overlaps (Deduplicated)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/hotels?city=delhi",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "hotels"
+          ],
+          "query": [
+            {
+              "key": "city",
+              "value": "delhi"
+            }
+          ]
+        },
+        "description": "Fetches all deduplicated hotel offers for Delhi via the Temporal workflow and Redis sorted set. Overlapping hotels across Supplier A and Supplier B should resolve to the lowest price."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status code is 200', function () {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "",
+              "const hotels = pm.response.json();",
+              "",
+              "pm.test('Response has exactly 10 deduplicated hotels', function () {",
+              "  pm.expect(hotels).to.be.an('array');",
+              "  pm.expect(hotels).to.have.lengthOf(10);",
+              "});",
+              "",
+              "pm.test('No duplicate hotel names (case-insensitive)', function () {",
+              "  const normalizedNames = hotels.map(h => String(h.name).trim().toLowerCase());",
+              "  const uniqueNames = new Set(normalizedNames);",
+              "  pm.expect(uniqueNames.size).to.eql(normalizedNames.length);",
+              "});",
+              "",
+              "pm.test('Each item has name, price, supplier, and commissionPct', function () {",
+              "  hotels.forEach(item => {",
+              "    pm.expect(item).to.be.an('object');",
+              "    pm.expect(item.name).to.be.a('string').and.not.be.empty;",
+              "    pm.expect(item.price).to.be.a('number').and.at.least(0);",
+              "    pm.expect(item.supplier).to.be.oneOf(['Supplier A', 'Supplier B']);",
+              "    pm.expect(item.commissionPct).to.be.a('number').and.at.least(0);",
+              "  });",
+              "});",
+              "",
+              "pm.test('Sorted ascending by price', function () {",
+              "  for (let i = 1; i < hotels.length; i++) {",
+              "    pm.expect(hotels[i].price).to.be.at.least(hotels[i - 1].price);",
+              "  }",
+              "});",
+              "",
+              "pm.test('Overlapping hotels resolve to the cheapest offer', function () {",
+              "  const byName = {};",
+              "  hotels.forEach(h => { byName[String(h.name).trim().toLowerCase()] = h; });",
+              "  pm.expect(byName['holtin']).to.include({ price: 5340, supplier: 'Supplier B', commissionPct: 20 });",
+              "  pm.expect(byName['radison']).to.include({ price: 5900, supplier: 'Supplier A', commissionPct: 13 });",
+              "  pm.expect(byName['taj palace']).to.include({ price: 7900, supplier: 'Supplier B', commissionPct: 16 });",
+              "  pm.expect(byName['oberoi grand']).to.include({ price: 9500, supplier: 'Supplier A', commissionPct: 15 });",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Delhi - Filter by minPrice and maxPrice",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/hotels?city=delhi&minPrice=5000&maxPrice=7500",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "hotels"
+          ],
+          "query": [
+            {
+              "key": "city",
+              "value": "delhi"
+            },
+            {
+              "key": "minPrice",
+              "value": "5000"
+            },
+            {
+              "key": "maxPrice",
+              "value": "7500"
+            }
+          ]
+        },
+        "description": "Filters deduplicated Delhi hotels in Redis using ZRANGEBYSCORE between 5000 and 7500 inclusive."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status code is 200', function () {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "",
+              "const hotels = pm.response.json();",
+              "",
+              "pm.test('Response is an array', function () {",
+              "  pm.expect(hotels).to.be.an('array');",
+              "});",
+              "",
+              "pm.test('All hotel prices are within [5000, 7500]', function () {",
+              "  pm.expect(hotels).to.have.lengthOf(4);",
+              "  hotels.forEach(item => {",
+              "    pm.expect(item.price).to.be.at.least(5000);",
+              "    pm.expect(item.price).to.be.at.most(7500);",
+              "  });",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Delhi - Filter by minPrice Only",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/hotels?city=delhi&minPrice=8000",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "hotels"
+          ],
+          "query": [
+            {
+              "key": "city",
+              "value": "delhi"
+            },
+            {
+              "key": "minPrice",
+              "value": "8000"
+            }
+          ]
+        },
+        "description": "Filters Delhi hotels with only minPrice set, verifying that an omitted maxPrice defaults to +inf in Redis ZRANGEBYSCORE."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status code is 200', function () {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "",
+              "const hotels = pm.response.json();",
+              "",
+              "pm.test('Response is an array', function () {",
+              "  pm.expect(hotels).to.be.an('array');",
+              "});",
+              "",
+              "pm.test('All hotel prices are >= 8000', function () {",
+              "  pm.expect(hotels).to.have.lengthOf(2);",
+              "  hotels.forEach(item => {",
+              "    pm.expect(item.price).to.be.at.least(8000);",
+              "  });",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Unknown City - No Results",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/hotels?city=jaipur",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "hotels"
+          ],
+          "query": [
+            {
+              "key": "city",
+              "value": "jaipur"
+            }
+          ]
+        },
+        "description": "Queries a city not present in either supplier dataset and verifies that the API returns 200 OK with an empty JSON array."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status code is 200', function () {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test('Response is an empty array []', function () {",
+              "  const hotels = pm.response.json();",
+              "  pm.expect(hotels).to.be.an('array').that.is.empty;",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "5a. Invalid Params - minPrice > maxPrice",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/hotels?city=delhi&minPrice=7000&maxPrice=5000",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "hotels"
+          ],
+          "query": [
+            {
+              "key": "city",
+              "value": "delhi"
+            },
+            {
+              "key": "minPrice",
+              "value": "7000"
+            },
+            {
+              "key": "maxPrice",
+              "value": "5000"
+            }
+          ]
+        },
+        "description": "Sends minPrice greater than maxPrice to verify synchronous validation rejects the request with 400 Bad Request before starting a workflow."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status code is 400', function () {",
+              "  pm.response.to.have.status(400);",
+              "});",
+              "",
+              "pm.test('Returns descriptive error message', function () {",
+              "  const body = pm.response.json();",
+              "  pm.expect(body).to.have.property('error').that.is.a('string');",
+              "  pm.expect(body.error).to.include('minPrice');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "5b. Invalid Params - Missing city",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/hotels",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "hotels"
+          ]
+        },
+        "description": "Omits the required city query parameter to verify synchronous validation returns 400 Bad Request."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status code is 400', function () {",
+              "  pm.response.to.have.status(400);",
+              "});",
+              "",
+              "pm.test('Returns descriptive error message', function () {",
+              "  const body = pm.response.json();",
+              "  pm.expect(body).to.have.property('error').that.is.a('string');",
+              "  pm.expect(body.error).to.include('city');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "6a. Supplier A Direct",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/supplierA/hotels?city=delhi",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "supplierA",
+            "hotels"
+          ],
+          "query": [
+            {
+              "key": "city",
+              "value": "delhi"
+            }
+          ]
+        },
+        "description": "Calls the mock Supplier A endpoint directly to inspect raw Delhi hotel listings before deduplication."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status code is 200', function () {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "",
+              "const hotels = pm.response.json();",
+              "",
+              "pm.test('Returns raw Supplier A hotel array with expected fields', function () {",
+              "  pm.expect(hotels).to.be.an('array').that.is.not.empty;",
+              "  hotels.forEach(item => {",
+              "    pm.expect(item).to.include.all.keys('hotelId', 'name', 'price', 'city', 'commissionPct');",
+              "  });",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "6b. Supplier B Direct",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/supplierB/hotels?city=delhi",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "supplierB",
+            "hotels"
+          ],
+          "query": [
+            {
+              "key": "city",
+              "value": "delhi"
+            }
+          ]
+        },
+        "description": "Calls the mock Supplier B endpoint directly to inspect raw Delhi hotel listings before deduplication."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status code is 200', function () {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "",
+              "const hotels = pm.response.json();",
+              "",
+              "pm.test('Returns raw Supplier B hotel array with expected fields', function () {",
+              "  pm.expect(hotels).to.be.an('array').that.is.not.empty;",
+              "  hotels.forEach(item => {",
+              "    pm.expect(item).to.include.all.keys('hotelId', 'name', 'price', 'city', 'commissionPct');",
+              "  });",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/health",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "health"
+          ]
+        },
+        "description": "Checks API health, Redis connectivity, and live availability of Supplier A and Supplier B. Returns 200 with status 'ok' (both suppliers up) or 'degraded' (one or both suppliers down), and 503 if Redis is down."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status code is 200', function () {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "",
+              "const body = pm.response.json();",
+              "",
+              "pm.test('Health payload reports redis and both suppliers', function () {",
+              "  pm.expect(body.status).to.be.oneOf(['ok', 'degraded']);",
+              "  pm.expect(body.redis).to.eql('up');",
+              "  pm.expect(body.suppliers).to.be.an('object');",
+              "  pm.expect(body.suppliers.supplierA).to.be.oneOf(['up', 'down']);",
+              "  pm.expect(body.suppliers.supplierB).to.be.oneOf(['up', 'down']);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "8. Simulate Supplier B Down (Optional)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/hotels?city=delhi",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "hotels"
+          ],
+          "query": [
+            {
+              "key": "city",
+              "value": "delhi"
+            }
+          ]
+        },
+        "description": "Verifies graceful degradation when Supplier B is unavailable. The test script probes /health first: with Supplier B down it asserts that every offer comes from Supplier A; otherwise it verifies Supplier B offers are present (outage assertions skipped).\n\nHow to trigger the outage:\n1. Restart the `app` service with the `SUPPLIER_B_DOWN` env flag enabled:\n   `SUPPLIER_B_DOWN=true docker compose up -d app`\n2. Run this request (and `/health`, which will report `status: \"degraded\"` and `suppliers.supplierB: \"down\"`).\n3. Restore normal operation afterward:\n   `SUPPLIER_B_DOWN=false docker compose up -d app`\n\n(You can simulate Supplier A being down the same way using `SUPPLIER_A_DOWN=true`.)"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status code is 200 despite Supplier B outage', function () {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "",
+              "const hotels = pm.response.json();",
+              "",
+              "pm.test('Response is a non-empty array', function () {",
+              "  pm.expect(hotels).to.be.an('array').that.is.not.empty;",
+              "});",
+              "",
+              "const base = pm.variables.get('baseUrl') || 'http://localhost:3000';",
+              "pm.sendRequest(base + '/health', function (err, res) {",
+              "  var supplierB = 'unknown';",
+              "  if (!err && res && res.code === 200) {",
+              "    try {",
+              "      supplierB = res.json().suppliers.supplierB;",
+              "    } catch (e) {",
+              "      supplierB = 'unknown';",
+              "    }",
+              "  }",
+              "",
+              "  if (supplierB === 'down') {",
+              "    pm.test('All returned offers come from Supplier A when SUPPLIER_B_DOWN=true', function () {",
+              "      hotels.forEach(item => {",
+              "        pm.expect(item.supplier).to.eql('Supplier A');",
+              "      });",
+              "    });",
+              "  } else {",
+              "    pm.test('Supplier B is up - outage assertions skipped (restart app with SUPPLIER_B_DOWN=true to enable)', function () {",
+              "      pm.expect(hotels.some(item => item.supplier === 'Supplier B')).to.be.true;",
+              "    });",
+              "  }",
+              "});"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
